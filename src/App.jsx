@@ -37,13 +37,16 @@ const SECTORS = [
       "prépa art rennes", "prépa art", "ecole graphisme", "ecole graphisme rennes",
       "bachelor design", "bachelor design rennes",
       "formation directeur artistique", "formation directeur artistique rennes",
+      // Nationaux — mots-clés ECV / ESMA
+      "bachelor design graphique", "école art digital", "prépa arts appliqués",
+      "école motion design", "formation illustration", "école concept art",
+      "école graphisme", "formation design graphique",
     ],
     competitors: [
       { name: "LISAA Rennes", domain: "lisaa.com" },
       { name: "BRASSART Rennes", domain: "brassart.fr" },
       { name: "MJM Graphic Design", domain: "mjm-design.com" },
       { name: "École de Condé Rennes", domain: "ecoles-conde.com" },
-      { name: "Pivaut Nantes", domain: "pivaut.com" },
       { name: "ECV", domain: "ecv.fr" },
       { name: "ESMA", domain: "esma-artistique.com" },
     ],
