@@ -33,13 +33,19 @@ const SECTORS = [
       "meilleure école de design france", "classement école design graphique",
       "bachelor design graphique alternance", "école motion design france",
       "école design graphique privée",
+      // Mots-clés SEO Studio M
+      "prépa art rennes", "prépa art", "ecole graphisme", "ecole graphisme rennes",
+      "bachelor design", "bachelor design rennes",
+      "formation directeur artistique", "formation directeur artistique rennes",
     ],
     competitors: [
       { name: "LISAA Rennes", domain: "lisaa.com" },
       { name: "BRASSART Rennes", domain: "brassart.fr" },
       { name: "MJM Graphic Design", domain: "mjm-design.com" },
       { name: "École de Condé Rennes", domain: "ecoles-conde.com" },
-      { name: "École de Design Nantes", domain: "lecolededesign.com" },
+      { name: "Pivaut Nantes", domain: "pivaut.com" },
+      { name: "ECV", domain: "ecv.fr" },
+      { name: "ESMA", domain: "esma-artistique.com" },
     ],
   },
   {
@@ -60,11 +66,13 @@ const SECTORS = [
       "meilleure école de cinéma france", "classement école audiovisuel france",
       "BTS audiovisuel alternance", "bachelor réalisateur monteur",
       "école audiovisuel privée france",
+      // Mots-clés SEO Studio M
+      "formation monteur vidéo", "formation monteur vidéo rennes",
     ],
     competitors: [
       { name: "ESRA Bretagne Rennes", domain: "esra.edu" },
-      { name: "CinéCréatis Nantes", domain: "cinecreatis.net" },
-      { name: "MJM Audiovisuel Rennes", domain: "mjm-design.com" },
+      { name: "3iS", domain: "3is.fr" },
+      { name: "EICAR", domain: "eicar.fr" },
       { name: "Ynov Campus Rennes", domain: "ynov.com" },
     ],
   },
