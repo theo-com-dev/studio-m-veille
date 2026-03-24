@@ -14,7 +14,7 @@ const GENERIC_DOMAINS = [
   "studyrama.com", "diplomeo.com", "orientation.com", "cidj.com",
   "ouest-france.fr", "letelegramme.fr", "lemonde.fr", "lefigaro.fr",
   "francetravail.fr", "pole-emploi.fr", "indeed.com", "glassdoor.fr",
-  "google.com", "google.fr", "apple.com", "vimeo.com",
+  "google.com", "google.fr", "apple.com", "vimeo.com", "dailymotion.com",
   "prepeers.co", "studi.com", "vocaneo.com", "imaginetonfutur.com",
   "iffdec.com", "meilleurs-masters.com", "profilculture-formation.com",
   "ideo.bretagne.bzh", "lecoledeDesign.com", "lecoledeDesign.fr",
