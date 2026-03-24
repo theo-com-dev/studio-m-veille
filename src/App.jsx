@@ -6,6 +6,21 @@ const STUDIO_M = {
   page: "https://www.studio-m.fr/ecole-audiovisuel-arts-appliques-rennes",
 };
 
+// Domaines génériques à ignorer dans la colonne "#1 Google"
+const GENERIC_DOMAINS = [
+  "youtube.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
+  "linkedin.com", "tiktok.com", "pinterest.com", "reddit.com", "wikipedia.org",
+  "parcoursup.fr", "dossier.parcoursup.fr", "onisep.fr", "letudiant.fr",
+  "studyrama.com", "diplomeo.com", "orientation.com", "cidj.com",
+  "ouest-france.fr", "letelegramme.fr", "lemonde.fr", "lefigaro.fr",
+  "francetravail.fr", "pole-emploi.fr", "indeed.com", "glassdoor.fr",
+  "google.com", "google.fr", "apple.com", "vimeo.com",
+  "prepeers.co", "studi.com", "vocaneo.com", "imaginetonfutur.com",
+  "iffdec.com", "meilleurs-masters.com", "profilculture-formation.com",
+  "ideo.bretagne.bzh", "lecoledeDesign.com", "lecoledeDesign.fr",
+  "cread.fr", "the-bridge-ecole.fr", "aftec.fr",
+];
+
 const T = {
   bg: "#08090F", surface: "#0E1018", card: "#13151F", elevated: "#191C29",
   border: "#1F2338", borderHover: "#2A2F4A", text: "#EDF0FA", sub: "#8090B8",
@@ -247,8 +262,14 @@ async function collectAll(sector, addLog) {
     try {
       const data = await serperSearch(kw);
 
-      // #1 Google
-      const first = data?.organic?.[0];
+      // #1 Google (ignorer les sites génériques)
+      const organics = data?.organic || [];
+      const first = organics.find(r => {
+        try {
+          const d = new URL(r.link).hostname.replace("www.", "");
+          return !GENERIC_DOMAINS.some(g => d === g || d.endsWith("." + g));
+        } catch { return false; }
+      });
       if (first) {
         const domain = new URL(first.link).hostname.replace("www.", "");
         topResults[kw] = { title: first.title, domain, link: first.link };
