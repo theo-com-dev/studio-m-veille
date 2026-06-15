@@ -285,8 +285,9 @@ async function getAvailableLLM() {
   catch { return []; }
 }
 
-// Mesure les citations IA sur les mots-clés à forte intention (sinon les 12 premiers), tous moteurs configurés.
-async function collectGEO(sector, providers, addLog) {
+// Mesure les citations IA sur les mots-clés à forte intention (sinon les 12 premiers).
+// passes = nombre de répétitions par requête → fiabilise le taux (les IA varient).
+async function collectGEO(sector, providers, addLog, passes = 3) {
   const allEntities = [
     { name: STUDIO_M.name, domain: STUDIO_M.domain, isMe: true },
     ...sector.competitors.map(c => ({ ...c, isMe: false })),
@@ -298,22 +299,39 @@ async function collectGEO(sector, providers, addLog) {
 
   for (const kw of keywords) {
     for (const provider of providers) {
-      addLog(`🤖 ${LLM_LABELS[provider] || provider} : "${kw}"`);
-      try {
-        const r = await aiSearch(provider, kw);
-        if (r.error) { addLog("⚠️ " + (LLM_LABELS[provider] || provider) + " : " + r.error); continue; }
-        for (const e of allEntities) {
-          const cited = citedInAnswer(r.answer, e);
-          if (!geo[e.domain].byKw[kw]) geo[e.domain].byKw[kw] = {};
-          geo[e.domain].byKw[kw][provider] = cited;
-          geo[e.domain].total++;
-          if (cited) geo[e.domain].cited++;
-        }
-        await new Promise(res => setTimeout(res, 400));
-      } catch (err) { addLog("⚠️ " + err.message); }
+      for (let pass = 0; pass < passes; pass++) {
+        addLog(`🤖 ${LLM_LABELS[provider] || provider} : "${kw}" (passage ${pass + 1}/${passes})`);
+        try {
+          const r = await aiSearch(provider, kw);
+          if (r.error) { addLog("⚠️ " + (LLM_LABELS[provider] || provider) + " : " + r.error); continue; }
+          for (const e of allEntities) {
+            const cited = citedInAnswer(r.answer, e);
+            const cell = geo[e.domain].byKw[kw] || (geo[e.domain].byKw[kw] = {});
+            if (!cell[provider]) cell[provider] = { cited: 0, passes: 0 };
+            cell[provider].passes++;
+            geo[e.domain].total++;
+            if (cited) { cell[provider].cited++; geo[e.domain].cited++; }
+          }
+          await new Promise(res => setTimeout(res, 350));
+        } catch (err) { addLog("⚠️ " + err.message); }
+      }
     }
   }
-  return { entities: geo, keywords, providers };
+  return { entities: geo, keywords, providers, passes };
+}
+
+// ─── Historique GEO (tendance dans le temps) ──────────────────────────────────
+function saveGeoHistory(sectorId, geo) {
+  const key = `geo_history_${sectorId}`;
+  const h = JSON.parse(localStorage.getItem(key) || "[]");
+  const entry = { date: new Date().toISOString(), passes: geo.passes || 1, rates: {} };
+  Object.values(geo.entities).forEach(e => { entry.rates[e.domain] = e.total ? Math.round((e.cited / e.total) * 100) : 0; });
+  h.push(entry);
+  if (h.length > 20) h.splice(0, h.length - 20);
+  localStorage.setItem(key, JSON.stringify(h));
+}
+function getGeoHistory(sectorId) {
+  try { return JSON.parse(localStorage.getItem(`geo_history_${sectorId}`) || "[]"); } catch { return []; }
 }
 
 async function collectAll(sector, addLog) {
@@ -729,6 +747,7 @@ function PAASection({ paaResults }) {
 function GeoPanel({ geo }) {
   if (!geo || !geo.entities) return null;
   const { entities, keywords, providers } = geo;
+  const passes = geo.passes || 1;
   const me = entities[STUDIO_M.domain];
   const sorted = Object.values(entities)
     .map(e => ({ ...e, rate: e.total ? Math.round((e.cited / e.total) * 100) : 0 }))
@@ -739,7 +758,7 @@ function GeoPanel({ geo }) {
       <div style={{ height: 2, background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})` }} />
       <div style={{ padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: T.purple }}>🤖 Citations IA — GEO ({providers.map(provLabel).join(" · ")})</div>
-        <div style={{ fontSize: 11, color: T.sub, marginBottom: 12 }}>Taux où ton école est <b>nommée dans la réponse</b> de l'IA (pas juste consultée en source), recherche web activée, sur {keywords.length} mots-clés. Mesure indicative (1 passage) — relance pour fiabiliser.</div>
+        <div style={{ fontSize: 11, color: T.sub, marginBottom: 12 }}>Taux où ton école est <b>nommée dans la réponse</b> de l'IA (pas juste consultée en source), recherche web activée, sur {keywords.length} mots-clés × <b>{passes} passage{passes > 1 ? "s" : ""}</b>. {passes > 1 ? "Mesure fiabilisée par répétition." : "1 passage = indicatif ; augmente les passages pour fiabiliser."}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
           {sorted.map((ent, i) => (
             <div key={ent.domain} style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -764,7 +783,10 @@ function GeoPanel({ geo }) {
                     <td style={{ padding: "6px 8px", color: T.text, borderBottom: "1px solid " + T.border, maxWidth: 220 }}>{kw}</td>
                     {providers.map(p => {
                       const c = me.byKw[kw] && me.byKw[kw][p];
-                      return <td key={p} style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid " + T.border, color: c ? T.green : T.dim, fontWeight: 800 }}>{c ? "✓" : "·"}</td>;
+                      const hit = c && c.cited > 0;
+                      const label = !c ? "·" : (c.passes > 1 ? `${c.cited}/${c.passes}` : (c.cited ? "✓" : "·"));
+                      const col = hit ? (c.cited === c.passes ? T.green : T.warm) : T.dim;
+                      return <td key={p} style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid " + T.border, color: col, fontWeight: 800 }}>{label}</td>;
                     })}
                   </tr>
                 ))}
@@ -777,14 +799,24 @@ function GeoPanel({ geo }) {
   );
 }
 
-function GeoCoach({ geo }) {
+function geoSpark(values, color) {
+  if (!values || values.length < 2) return null;
+  const w = 120, h = 26, min = Math.min(...values), max = Math.max(...values, 1), span = (max - min) || 1;
+  const pts = values.map((v, i) => `${(i / (values.length - 1) * w).toFixed(1)},${(h - 3 - ((v - min) / span) * (h - 6)).toFixed(1)}`).join(" ");
+  return <svg width={w} height={h} style={{ verticalAlign: "middle" }}><polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" /></svg>;
+}
+
+function GeoCoach({ geo, history }) {
   if (!geo || !geo.entities) return null;
   const me = geo.entities[STUDIO_M.domain];
   if (!me) return null;
   const rate = me.total ? Math.round((me.cited / me.total) * 100) : 0;
+  const hist = (history || []).map(e => (e.rates ? e.rates[STUDIO_M.domain] : null)).filter(v => v != null);
+  const prev = hist.length >= 2 ? hist[hist.length - 2] : null;
+  const delta = prev != null ? rate - prev : null;
   const absents = (geo.keywords || []).filter(kw => {
     const row = me.byKw[kw] || {};
-    return (geo.providers || []).every(p => !row[p]);
+    return (geo.providers || []).every(p => !row[p] || row[p].cited === 0);
   });
   let verdict, vcolor;
   if (rate === 0) { verdict = "Tu n'es encore nommé sur aucune requête. C'est ta ligne de départ honnête — l'objectif immédiat est de passer au-dessus de 0."; vcolor = T.red; }
@@ -806,6 +838,13 @@ function GeoCoach({ geo }) {
       <div style={{ padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: T.green }}>📈 Où j'en suis & comment progresser</div>
         <div style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>Tu es nommé dans <b style={{ color: vcolor }}>{rate}%</b> des réponses IA mesurées ({me.cited}/{me.total}).</div>
+        {delta != null && (
+          <div style={{ fontSize: 11.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 800, color: delta > 0 ? T.green : delta < 0 ? T.red : T.sub }}>{delta > 0 ? `↑ +${delta} pts` : delta < 0 ? `↓ ${delta} pts` : "= stable"}</span>
+            <span style={{ color: T.dim }}>depuis le dernier test ({prev}%)</span>
+            {geoSpark(hist, T.purple)}
+          </div>
+        )}
         <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 12, lineHeight: 1.6 }}>{verdict}</div>
 
         {absents.length > 0 && (
@@ -913,7 +952,7 @@ function ScoreOverview({ entities, totalKeywords, sectorColor }) {
   );
 }
 
-function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, geoStatus, availableLLM }) {
+function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, geoStatus, availableLLM, geoPasses, onPassesChange, geoHistory }) {
   const entities = data.entities || data;
   const topResults = data.topResults || {};
   const paaResults = data.paaResults || {};
@@ -935,6 +974,13 @@ function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, ge
             Comparé au {new Date(prevPositions.date).toLocaleDateString("fr-FR")}
           </span>
         )}
+        {hasLLM && (
+          <select value={geoPasses} onChange={e => onPassesChange(Number(e.target.value))} disabled={geoScanning} title="Nombre de répétitions par requête : plus = plus fiable" style={{ padding: "8px 10px", borderRadius: 9, fontSize: 11, fontWeight: 600, border: "1px solid " + T.border, background: T.elevated, color: T.sub }}>
+            <option value={1}>1 passage (rapide)</option>
+            <option value={3}>3 passages (fiable)</option>
+            <option value={5}>5 passages (rigoureux)</option>
+          </select>
+        )}
         <button onClick={onRunGeo} disabled={geoScanning || !hasLLM} title={hasLLM ? "Mesure les citations IA sur tes mots-clés" : "Aucune clé IA configurée (GEMINI_API_KEY… dans les variables Vercel)"} style={{ padding: "9px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "1px solid " + T.purple + "55", background: geoScanning ? T.elevated : T.purple + "18", color: hasLLM ? T.purple : T.dim }}>
           {geoScanning ? "🤖 Mesure GEO..." : hasLLM ? "🤖 Mesurer le GEO" : "🤖 GEO (clé IA manquante)"}
         </button>
@@ -948,7 +994,7 @@ function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, ge
 
       {/* GEO — citations IA */}
       {data.geo && <GeoPanel geo={data.geo} />}
-      {data.geo && <GeoCoach geo={data.geo} />}
+      {data.geo && <GeoCoach geo={data.geo} history={geoHistory} />}
 
       {/* Opportunités manquées */}
       <MissedOpportunities data={entities} keywords={keywords} />
@@ -1109,6 +1155,8 @@ export default function App() {
   const [newsOpen, setNewsOpen] = useState(false);
   const [newsData, setNewsData] = useState(null);
   const [newsStatus, setNewsStatus] = useState("idle");
+  const [geoPasses, setGeoPasses] = useState(3);
+  const [geoHistory, setGeoHistory] = useState({});
   const scanning = useRef(false);
 
   useEffect(() => { getAvailableLLM().then(setAvailableLLM); }, []);
@@ -1188,13 +1236,20 @@ export default function App() {
   const runGEO = useCallback(async (sectorId) => {
     if (scanning.current) return;
     if (!availableLLM.length) { addLog("⚠️ Aucune clé IA configurée (GEMINI_API_KEY… dans Vercel)"); return; }
-    scanning.current = true;
     const sector = SECTORS.find(s => s.id === sectorId);
+    const hi = sector.keywords.filter(k => /meilleur|avis|prix|classement/i.test(k));
+    const nbKw = (hi.length ? hi : sector.keywords).slice(0, 12).length;
+    const totalCalls = nbKw * availableLLM.length * geoPasses;
+    const paid = availableLLM.some(p => p === "openai" || p === "claude");
+    if ((paid || totalCalls > 60) && !window.confirm(`Ce test = ${totalCalls} appels (${nbKw} mots-clés × ${availableLLM.length} moteur(s) × ${geoPasses} passage(s)).${paid ? " Des moteurs PAYANTS sont actifs." : ""} Continuer ?`)) return;
+    scanning.current = true;
     setGeoStatus(p => ({ ...p, [sectorId]: "scanning" }));
     setLogs([]);
     try {
-      addLog(`🤖 Mesure GEO ${sector.label} — moteurs : ${availableLLM.map(p => LLM_LABELS[p] || p).join(", ")}`);
-      const geo = await collectGEO(sector, availableLLM, addLog);
+      addLog(`🤖 Mesure GEO ${sector.label} — ${availableLLM.map(p => LLM_LABELS[p] || p).join(", ")} × ${geoPasses} passage(s)`);
+      const geo = await collectGEO(sector, availableLLM, addLog, geoPasses);
+      saveGeoHistory(sectorId, geo);
+      setGeoHistory(p => ({ ...p, [sectorId]: getGeoHistory(sectorId) }));
       setAllData(p => ({ ...p, [sectorId]: { ...(p[sectorId] || {}), geo } }));
       setGeoStatus(p => ({ ...p, [sectorId]: "done" }));
       addLog("✅ Citations IA mesurées !");
@@ -1203,7 +1258,7 @@ export default function App() {
       setGeoStatus(p => ({ ...p, [sectorId]: "error" }));
     }
     scanning.current = false;
-  }, [addLog, availableLLM]);
+  }, [addLog, availableLLM, geoPasses]);
 
   const handleCopy = useCallback(() => {
     const sector = SECTORS.find(s => s.id === activeSector);
@@ -1321,7 +1376,7 @@ export default function App() {
 
         {/* Résultats */}
         {activeData && activeStatus === "done" && (
-          <ResultsView sector={activeSectorData} data={activeData} onCopy={handleCopy} copied={copied} prevPositions={prevPositions[activeSector]} onRunGeo={() => runGEO(activeSector)} geoStatus={geoStatus[activeSector]} availableLLM={availableLLM} />
+          <ResultsView sector={activeSectorData} data={activeData} onCopy={handleCopy} copied={copied} prevPositions={prevPositions[activeSector]} onRunGeo={() => runGEO(activeSector)} geoStatus={geoStatus[activeSector]} availableLLM={availableLLM} geoPasses={geoPasses} onPassesChange={setGeoPasses} geoHistory={geoHistory[activeSector]} />
         )}
       </main>
 
