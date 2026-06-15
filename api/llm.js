@@ -1,7 +1,8 @@
 // Mesure GEO : interroge un moteur IA avec recherche web et renvoie les citations réelles.
 // Clés dans les variables d'environnement Vercel : GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY.
 
-const MODELS = { claude: "claude-opus-4-8", gemini: "gemini-2.5-flash", openai: "gpt-5-mini" };
+// Modèles économiques : pour un test "es-tu nommé ?", inutile de payer le haut de gamme.
+const MODELS = { claude: "claude-haiku-4-5", gemini: "gemini-2.5-flash", openai: "gpt-5-mini" };
 
 async function testClaude(apiKey, query, model) {
   const body = {
