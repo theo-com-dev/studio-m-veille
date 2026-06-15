@@ -246,6 +246,61 @@ async function searchSocials(entityName) {
   return socials;
 }
 
+// ─── GEO : citations IA ────────────────────────────────────────────────────
+
+const LLM_LABELS = { gemini: "Gemini", openai: "ChatGPT", claude: "Claude" };
+
+function domainCited(citations, searchResults, domain) {
+  const all = (citations || []).concat(searchResults || []);
+  const d = domain.toLowerCase();
+  return all.some(c => (((c.url || "") + " " + (c.title || "")).toLowerCase()).includes(d));
+}
+
+async function aiSearch(provider, query) {
+  const r = await fetch("/api/llm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, query }),
+  });
+  return r.json();
+}
+
+async function getAvailableLLM() {
+  try { const r = await fetch("/api/llm"); const d = await r.json(); return d.available || []; }
+  catch { return []; }
+}
+
+// Mesure les citations IA sur les mots-clés à forte intention (sinon les 12 premiers), tous moteurs configurés.
+async function collectGEO(sector, providers, addLog) {
+  const allEntities = [
+    { name: STUDIO_M.name, domain: STUDIO_M.domain, isMe: true },
+    ...sector.competitors.map(c => ({ ...c, isMe: false })),
+  ];
+  const highIntent = sector.keywords.filter(k => /meilleur|avis|prix|classement/i.test(k));
+  const keywords = (highIntent.length ? highIntent : sector.keywords).slice(0, 12);
+  const geo = {};
+  allEntities.forEach(e => { geo[e.domain] = { ...e, byKw: {}, cited: 0, total: 0 }; });
+
+  for (const kw of keywords) {
+    for (const provider of providers) {
+      addLog(`🤖 ${LLM_LABELS[provider] || provider} : "${kw}"`);
+      try {
+        const r = await aiSearch(provider, kw);
+        if (r.error) { addLog("⚠️ " + (LLM_LABELS[provider] || provider) + " : " + r.error); continue; }
+        for (const e of allEntities) {
+          const cited = domainCited(r.citations, r.searchResults, e.domain);
+          if (!geo[e.domain].byKw[kw]) geo[e.domain].byKw[kw] = {};
+          geo[e.domain].byKw[kw][provider] = cited;
+          geo[e.domain].total++;
+          if (cited) geo[e.domain].cited++;
+        }
+        await new Promise(res => setTimeout(res, 400));
+      } catch (err) { addLog("⚠️ " + err.message); }
+    }
+  }
+  return { entities: geo, keywords, providers };
+}
+
 async function collectAll(sector, addLog) {
   const allEntities = [
     { name: STUDIO_M.name, domain: STUDIO_M.domain, isMe: true },
@@ -457,6 +512,15 @@ function formatForClaude(sector, data, prevPositions) {
 
   text += `── CONCURRENTS ──\n`;
   text += competitors.map(formatEntity).join("\n\n");
+
+  if (data.geo && data.geo.entities) {
+    const g = data.geo;
+    text += `\n\n── CITATIONS IA (GEO) — ${g.providers.map(p => p).join(", ")} · ${g.keywords.length} mots-clés ──\n`;
+    Object.values(g.entities)
+      .map(e => ({ ...e, rate: e.total ? Math.round((e.cited / e.total) * 100) : 0 }))
+      .sort((a, b) => b.rate - a.rate)
+      .forEach(e => { text += `  ${e.isMe ? "🎯 " : ""}${e.name} : ${e.rate}% cité (${e.cited}/${e.total} mesures IA)\n`; });
+  }
   return text;
 }
 
@@ -647,6 +711,57 @@ function PAASection({ paaResults }) {
   );
 }
 
+function GeoPanel({ geo }) {
+  if (!geo || !geo.entities) return null;
+  const { entities, keywords, providers } = geo;
+  const me = entities[STUDIO_M.domain];
+  const sorted = Object.values(entities)
+    .map(e => ({ ...e, rate: e.total ? Math.round((e.cited / e.total) * 100) : 0 }))
+    .sort((a, b) => b.rate - a.rate);
+  const provLabel = p => LLM_LABELS[p] || p;
+  return (
+    <div style={{ background: T.card, border: "1px solid " + T.purple + "30", borderRadius: 14, overflow: "hidden", marginBottom: 14 }}>
+      <div style={{ height: 2, background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})` }} />
+      <div style={{ padding: "14px 16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: T.purple }}>🤖 Citations IA — GEO ({providers.map(provLabel).join(" · ")})</div>
+        <div style={{ fontSize: 11, color: T.sub, marginBottom: 12 }}>Taux de citation réel dans les réponses des IA (recherche web activée), sur {keywords.length} mots-clés à forte intention. Mesure indicative (1 passage) — relance pour fiabiliser la tendance.</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {sorted.map((ent, i) => (
+            <div key={ent.domain} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: i === 0 ? T.green : T.sub, width: 18 }}>#{i + 1}</span>
+              <span style={{ fontSize: 12, fontWeight: ent.isMe ? 800 : 600, color: ent.isMe ? T.purple : T.text, width: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ent.isMe ? "🎯 " : ""}{ent.name}</span>
+              <div style={{ flex: 1 }}><ScoreBar score={ent.rate} color={T.purple} /></div>
+              <span style={{ fontSize: 10, color: T.dim, minWidth: 54, textAlign: "right" }}>{ent.cited}/{ent.total}</span>
+            </div>
+          ))}
+        </div>
+        {me && (
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>🎯 Studio M cité ? (mot-clé × moteur)</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead><tr>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: T.sub, borderBottom: "1px solid " + T.border }}>Mot-clé</th>
+                {providers.map(p => <th key={p} style={{ textAlign: "center", padding: "6px 8px", color: T.purple, borderBottom: "1px solid " + T.border }}>{provLabel(p)}</th>)}
+              </tr></thead>
+              <tbody>
+                {keywords.map(kw => (
+                  <tr key={kw}>
+                    <td style={{ padding: "6px 8px", color: T.text, borderBottom: "1px solid " + T.border, maxWidth: 220 }}>{kw}</td>
+                    {providers.map(p => {
+                      const c = me.byKw[kw] && me.byKw[kw][p];
+                      return <td key={p} style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid " + T.border, color: c ? T.green : T.dim, fontWeight: 800 }}>{c ? "✓" : "·"}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdsSection({ adsResults, allEntities }) {
   // Agréger par annonceur
   const adsByDomain = {};
@@ -722,7 +837,7 @@ function ScoreOverview({ entities, totalKeywords, sectorColor }) {
   );
 }
 
-function ResultsView({ sector, data, onCopy, copied, prevPositions }) {
+function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, geoStatus, availableLLM }) {
   const entities = data.entities || data;
   const topResults = data.topResults || {};
   const paaResults = data.paaResults || {};
@@ -732,16 +847,21 @@ function ResultsView({ sector, data, onCopy, copied, prevPositions }) {
 
   const allEntities = [me, ...competitors].filter(Boolean);
   const keywords = sector.keywords;
+  const geoScanning = geoStatus === "scanning";
+  const hasLLM = (availableLLM || []).length > 0;
 
   return (
     <div style={{ animation: "fadeIn .4s ease" }}>
-      {/* Bouton copier */}
+      {/* Boutons */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12, gap: 8, alignItems: "center" }}>
         {prevPositions && (
           <span style={{ fontSize: 10, color: T.dim }}>
             Comparé au {new Date(prevPositions.date).toLocaleDateString("fr-FR")}
           </span>
         )}
+        <button onClick={onRunGeo} disabled={geoScanning || !hasLLM} title={hasLLM ? "Mesure les citations IA sur tes mots-clés" : "Aucune clé IA configurée (GEMINI_API_KEY… dans les variables Vercel)"} style={{ padding: "9px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "1px solid " + T.purple + "55", background: geoScanning ? T.elevated : T.purple + "18", color: hasLLM ? T.purple : T.dim }}>
+          {geoScanning ? "🤖 Mesure GEO..." : hasLLM ? "🤖 Mesurer le GEO" : "🤖 GEO (clé IA manquante)"}
+        </button>
         <button onClick={onCopy} style={{ padding: "9px 20px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "none", background: copied ? T.green : `linear-gradient(135deg,${T.accent},${T.warm})`, color: "#fff", transition: "all .3s" }}>
           {copied ? "✅ Copié ! Colle dans Claude Pro" : "📋 Copier pour Claude Pro"}
         </button>
@@ -749,6 +869,9 @@ function ResultsView({ sector, data, onCopy, copied, prevPositions }) {
 
       {/* Score SEO */}
       <ScoreOverview entities={entities} totalKeywords={keywords.length} sectorColor={sector.color} />
+
+      {/* GEO — citations IA */}
+      {data.geo && <GeoPanel geo={data.geo} />}
 
       {/* Opportunités manquées */}
       <MissedOpportunities data={entities} keywords={keywords} />
@@ -839,6 +962,64 @@ function LogPanel({ logs }) {
   );
 }
 
+function relDate(daysAgo) {
+  if (daysAgo <= 0) return "aujourd'hui";
+  if (daysAgo === 1) return "hier";
+  if (daysAgo < 7) return `il y a ${daysAgo} j`;
+  return `il y a ${Math.round(daysAgo / 7)} sem.`;
+}
+
+function NewsView({ status, data, onRefresh, onClose }) {
+  const items = (data && data.items) || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: T.bg + "FA", zIndex: 100, overflow: "auto", padding: "20px" }}>
+      <div style={{ maxWidth: 820, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>📰 Nouveautés GEO / SEO</div>
+            <div style={{ fontSize: 11, color: T.sub }}>
+              Actus des 3 dernières semaines · dates réelles de Google News (jamais devinées){data && data.fetchedAt ? " · maj " + new Date(data.fetchedAt).toLocaleString("fr-FR") : ""}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onRefresh} disabled={status === "loading"} style={{ padding: "8px 16px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "1px solid " + T.border, background: "transparent", color: T.sub }}>{status === "loading" ? "⏳ ..." : "⟳ Actualiser"}</button>
+            <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "none", background: T.elevated, color: T.text }}>✕ Fermer</button>
+          </div>
+        </div>
+
+        {status === "loading" && <div style={{ textAlign: "center", padding: 40, color: T.sub, fontSize: 13 }}>Recherche des actualités datées…</div>}
+        {data && data.error && <div style={{ padding: 16, borderRadius: 12, background: T.red + "15", color: T.red, fontSize: 13 }}>{data.error}<div style={{ fontSize: 11, color: T.sub, marginTop: 6 }}>Vérifie que SERPER_API_KEY est bien définie dans les variables Vercel.</div></div>}
+
+        {data && data.summary && (
+          <div style={{ background: T.card, border: "1px solid " + T.purple + "30", borderRadius: 14, padding: "14px 16px", marginBottom: 14, whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.7, color: T.text }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: T.purple, marginBottom: 8 }}>🤖 Ce qui ressort (synthèse Gemini)</div>
+            {data.summary}
+          </div>
+        )}
+
+        {status === "done" && items.length === 0 && !(data && data.error) && (
+          <div style={{ textAlign: "center", padding: 40, color: T.sub, fontSize: 13 }}>Aucune nouveauté datée dans les 3 dernières semaines sur ces sujets. (C'est une info honnête, pas un bug.)</div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((it, i) => (
+            <a key={i} href={it.link} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+              <div style={{ background: T.card, border: "1px solid " + T.border, borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{it.title}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: it.daysAgo <= 7 ? T.green : T.warm, whiteSpace: "nowrap" }}>{relDate(it.daysAgo)}</span>
+                </div>
+                <div style={{ fontSize: 10, color: T.dim, marginTop: 4 }}>{it.source}{it.date ? " · " + it.date : ""}</div>
+                {it.snippet && <div style={{ fontSize: 11, color: T.sub, marginTop: 6, lineHeight: 1.5 }}>{it.snippet}</div>}
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [allData, setAllData] = useState({});
   const [status, setStatus] = useState({});
@@ -846,7 +1027,38 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [copied, setCopied] = useState(false);
   const [prevPositions, setPrevPositions] = useState({});
+  const [availableLLM, setAvailableLLM] = useState([]);
+  const [geoStatus, setGeoStatus] = useState({});
+  const [newsOpen, setNewsOpen] = useState(false);
+  const [newsData, setNewsData] = useState(null);
+  const [newsStatus, setNewsStatus] = useState("idle");
   const scanning = useRef(false);
+
+  useEffect(() => { getAvailableLLM().then(setAvailableLLM); }, []);
+
+  const loadNews = useCallback(async (force) => {
+    const CACHE = "geo_news_cache";
+    if (!force) {
+      try {
+        const c = JSON.parse(localStorage.getItem(CACHE) || "null");
+        if (c && Date.now() - c.ts < 6 * 3600 * 1000) { setNewsData(c.data); setNewsStatus("done"); return; }
+      } catch { /* cache illisible */ }
+    }
+    setNewsStatus("loading");
+    try {
+      const r = await fetch("/api/news", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ windowDays: 21 }) });
+      let data;
+      try { data = await r.json(); } catch { data = { error: "L'API /api/news n'est pas disponible (déploie sur Vercel, ou lance `vercel dev` en local)." }; }
+      setNewsData(data);
+      setNewsStatus("done");
+      if (data && !data.error) localStorage.setItem(CACHE, JSON.stringify({ ts: Date.now(), data }));
+    } catch (e) {
+      setNewsData({ error: e.message });
+      setNewsStatus("done");
+    }
+  }, []);
+
+  const openNews = useCallback(() => { setNewsOpen(true); loadNews(false); }, [loadNews]);
 
   const addLog = useCallback(msg => {
     const ts = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -896,6 +1108,26 @@ export default function App() {
     }
   }, [runSector]);
 
+  const runGEO = useCallback(async (sectorId) => {
+    if (scanning.current) return;
+    if (!availableLLM.length) { addLog("⚠️ Aucune clé IA configurée (GEMINI_API_KEY… dans Vercel)"); return; }
+    scanning.current = true;
+    const sector = SECTORS.find(s => s.id === sectorId);
+    setGeoStatus(p => ({ ...p, [sectorId]: "scanning" }));
+    setLogs([]);
+    try {
+      addLog(`🤖 Mesure GEO ${sector.label} — moteurs : ${availableLLM.map(p => LLM_LABELS[p] || p).join(", ")}`);
+      const geo = await collectGEO(sector, availableLLM, addLog);
+      setAllData(p => ({ ...p, [sectorId]: { ...(p[sectorId] || {}), geo } }));
+      setGeoStatus(p => ({ ...p, [sectorId]: "done" }));
+      addLog("✅ Citations IA mesurées !");
+    } catch (err) {
+      addLog("❌ " + err.message);
+      setGeoStatus(p => ({ ...p, [sectorId]: "error" }));
+    }
+    scanning.current = false;
+  }, [addLog, availableLLM]);
+
   const handleCopy = useCallback(() => {
     const sector = SECTORS.find(s => s.id === activeSector);
     const data = allData[activeSector];
@@ -933,6 +1165,9 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={openNews} style={{ padding: "7px 16px", borderRadius: 9, fontSize: 11, fontWeight: 700, border: "1px solid " + T.purple + "55", background: T.purple + "18", color: T.purple }}>
+            📰 Nouveautés
+          </button>
           <button onClick={() => runSector(activeSector)} disabled={isScanning} style={{ padding: "7px 18px", borderRadius: 9, fontSize: 11, fontWeight: 700, border: "none", background: isScanning ? T.elevated : `linear-gradient(135deg,${activeSectorData.color},${T.accent})`, color: isScanning ? T.sub : "#fff" }}>
             {isScanning ? "⏳ Analyse..." : `${activeSectorData.emoji} Analyser`}
           </button>
@@ -1009,9 +1244,11 @@ export default function App() {
 
         {/* Résultats */}
         {activeData && activeStatus === "done" && (
-          <ResultsView sector={activeSectorData} data={activeData} onCopy={handleCopy} copied={copied} prevPositions={prevPositions[activeSector]} />
+          <ResultsView sector={activeSectorData} data={activeData} onCopy={handleCopy} copied={copied} prevPositions={prevPositions[activeSector]} onRunGeo={() => runGEO(activeSector)} geoStatus={geoStatus[activeSector]} availableLLM={availableLLM} />
         )}
       </main>
+
+      {newsOpen && <NewsView status={newsStatus} data={newsData} onRefresh={() => loadNews(true)} onClose={() => setNewsOpen(false)} />}
     </div>
   );
 }
