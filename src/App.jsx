@@ -777,6 +777,67 @@ function GeoPanel({ geo }) {
   );
 }
 
+function GeoCoach({ geo }) {
+  if (!geo || !geo.entities) return null;
+  const me = geo.entities[STUDIO_M.domain];
+  if (!me) return null;
+  const rate = me.total ? Math.round((me.cited / me.total) * 100) : 0;
+  const absents = (geo.keywords || []).filter(kw => {
+    const row = me.byKw[kw] || {};
+    return (geo.providers || []).every(p => !row[p]);
+  });
+  let verdict, vcolor;
+  if (rate === 0) { verdict = "Tu n'es encore nommé sur aucune requête. C'est ta ligne de départ honnête — l'objectif immédiat est de passer au-dessus de 0."; vcolor = T.red; }
+  else if (rate < 40) { verdict = "Tu perces sur quelques requêtes, mais tu restes minoritaire : les concurrents dominent encore le corpus de réputation que l'IA lit."; vcolor = T.warm; }
+  else if (rate < 80) { verdict = "Bonne présence sur une partie des requêtes. Le travail restant : couvrir celles où tu es absent."; vcolor = T.yellow; }
+  else { verdict = "Tu es nommé sur la majorité des requêtes — position solide. Il s'agit de la maintenir et de la défendre."; vcolor = T.green; }
+
+  const levier = (titre, pourquoi, quoi) => (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>{titre}</div>
+      <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2, lineHeight: 1.55 }}><b style={{ color: T.purple }}>Pourquoi : </b>{pourquoi}</div>
+      <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2, lineHeight: 1.55 }}><b style={{ color: T.green }}>Quoi faire : </b>{quoi}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: T.card, border: "1px solid " + T.green + "30", borderRadius: 14, overflow: "hidden", marginBottom: 14 }}>
+      <div style={{ height: 2, background: `linear-gradient(90deg,${T.green},${T.cyan})` }} />
+      <div style={{ padding: "14px 16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: T.green }}>📈 Où j'en suis & comment progresser</div>
+        <div style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>Tu es nommé dans <b style={{ color: vcolor }}>{rate}%</b> des réponses IA mesurées ({me.cited}/{me.total}).</div>
+        <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 12, lineHeight: 1.6 }}>{verdict}</div>
+
+        {absents.length > 0 && (
+          <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 12, padding: "8px 12px", background: T.red + "10", borderRadius: 8, lineHeight: 1.5 }}>
+            <b style={{ color: T.warm }}>Totalement absent sur : </b>{absents.join(" · ")}.<br />Ce sont tes cibles prioritaires.
+          </div>
+        )}
+
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: T.purple, margin: "6px 0 6px", letterSpacing: ".06em" }}>POURQUOI UNE IA TE NOMME (OU PAS)</div>
+        <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 12, lineHeight: 1.6 }}>
+          Pour « meilleure école… », l'IA recopie un <b>consensus</b> qu'elle lit dans des sources tierces (avis, classements, comparatifs). Elle ne te croit pas sur parole : elle nomme qui <b>revient</b> dans ces sources. D'où ce plan.
+        </div>
+
+        {levier("1. Réputation tierce — le plus puissant pour « meilleure / avis »",
+          "« Le meilleur » est un consensus que l'IA recopie depuis les avis, classements et comparatifs. Ces requêtes se gagnent là, pas sur ton site.",
+          "Récolte des avis Google (sollicite étudiants + diplômés) ; fais-toi lister et bien noter sur Diplomeo, Studyrama, L'Étudiant ; entre dans les articles « meilleures écoles … à Rennes ».")}
+        {levier("2. Être trouvable & clairement identifiable",
+          "L'IA ne nomme que ce qu'elle trouve et comprend. Sans page nette « école de [métier] à Rennes », tu n'es même pas candidat.",
+          "Une page claire par programme × Rennes (titre + H1 explicites), des données structurées (schema), un Google Business Profile complet.")}
+        {levier("3. Répondre aux sous-questions (prix, débouchés, programme)",
+          "L'IA décompose « meilleure école » en sous-questions. Y répondre te rend plus citable — et te fait apparaître sur ces requêtes précises (ex. « … prix »).",
+          "Ajoute des blocs-réponses datés : combien ça coûte, quels débouchés, quel programme, comment s'inscrire — plus une FAQ.")}
+        {levier("4. Crédibilité (E-E-A-T)",
+          "L'IA filtre pour les institutions fiables et reconnues.",
+          "Mets en avant la reconnaissance RNCP, le taux d'insertion, les projets d'étudiants, les partenariats (TV Rennes…).")}
+
+        <div style={{ fontSize: 11, color: T.dim, marginTop: 4 }}>Refais le test après chaque action : si ce % monte, ton travail paie. C'est ta preuve.</div>
+      </div>
+    </div>
+  );
+}
+
 function AdsSection({ adsResults, allEntities }) {
   // Agréger par annonceur
   const adsByDomain = {};
@@ -887,6 +948,7 @@ function ResultsView({ sector, data, onCopy, copied, prevPositions, onRunGeo, ge
 
       {/* GEO — citations IA */}
       {data.geo && <GeoPanel geo={data.geo} />}
+      {data.geo && <GeoCoach geo={data.geo} />}
 
       {/* Opportunités manquées */}
       <MissedOpportunities data={entities} keywords={keywords} />
