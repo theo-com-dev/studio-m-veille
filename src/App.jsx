@@ -256,6 +256,21 @@ function domainCited(citations, searchResults, domain) {
   return all.some(c => (((c.url || "") + " " + (c.title || "")).toLowerCase()).includes(d));
 }
 
+const NEEDLE_STOP = new Set(["rennes", "ecole", "ecoles", "campus", "de", "du", "des", "la", "le", "graphic", "graphique", "design", "arts", "art", "appliques", "bretagne"]);
+function stripAccents(s) { return String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+function entityNeedles(entity) {
+  const tokens = stripAccents(entity.name).split(/[^a-z0-9]+/).filter(Boolean);
+  const phrase = tokens.filter(w => !NEEDLE_STOP.has(w)).join(" ").trim();
+  const root = stripAccents(entity.domain).replace(/\.(com|fr|edu|net|org|bzh|io)$/, "");
+  return [phrase, root, stripAccents(entity.domain)].filter(n => n && n.length >= 2);
+}
+// GEO réel : l'école est NOMMÉE dans la réponse de l'IA (pas juste consultée en source).
+function citedInAnswer(answer, entity) {
+  if (!answer) return false;
+  const hay = stripAccents(answer);
+  return entityNeedles(entity).some(n => hay.includes(n));
+}
+
 async function aiSearch(provider, query) {
   const r = await fetch("/api/llm", {
     method: "POST",
@@ -288,7 +303,7 @@ async function collectGEO(sector, providers, addLog) {
         const r = await aiSearch(provider, kw);
         if (r.error) { addLog("⚠️ " + (LLM_LABELS[provider] || provider) + " : " + r.error); continue; }
         for (const e of allEntities) {
-          const cited = domainCited(r.citations, r.searchResults, e.domain);
+          const cited = citedInAnswer(r.answer, e);
           if (!geo[e.domain].byKw[kw]) geo[e.domain].byKw[kw] = {};
           geo[e.domain].byKw[kw][provider] = cited;
           geo[e.domain].total++;
@@ -724,7 +739,7 @@ function GeoPanel({ geo }) {
       <div style={{ height: 2, background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})` }} />
       <div style={{ padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: T.purple }}>🤖 Citations IA — GEO ({providers.map(provLabel).join(" · ")})</div>
-        <div style={{ fontSize: 11, color: T.sub, marginBottom: 12 }}>Taux de citation réel dans les réponses des IA (recherche web activée), sur {keywords.length} mots-clés à forte intention. Mesure indicative (1 passage) — relance pour fiabiliser la tendance.</div>
+        <div style={{ fontSize: 11, color: T.sub, marginBottom: 12 }}>Taux où ton école est <b>nommée dans la réponse</b> de l'IA (pas juste consultée en source), recherche web activée, sur {keywords.length} mots-clés. Mesure indicative (1 passage) — relance pour fiabiliser.</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
           {sorted.map((ent, i) => (
             <div key={ent.domain} style={{ display: "flex", alignItems: "center", gap: 12 }}>
