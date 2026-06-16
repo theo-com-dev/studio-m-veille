@@ -2,13 +2,15 @@
 // Récupère les actus DATÉES (Serper /news, dates réelles de Google News), filtre sur la fenêtre,
 // et génère une synthèse via Gemini si GEMINI_API_KEY est configurée. Aucune date inventée par l'IA.
 
+// Requêtes ancrées SEO/GEO (jamais l'IA en général) + angle France.
 const DEFAULT_QUERIES = [
-  "Google AI Overviews update",
-  "Google Search algorithm update core update",
-  "Google AI Mode search",
-  "generative engine optimization GEO",
-  "AI search optimization ChatGPT Perplexity citations",
-  "référencement Google nouveauté SEO",
+  "Google Search algorithm update SEO",
+  "Google AI Overviews référencement SEO",
+  "Google AI Mode search SEO",
+  "generative engine optimization GEO citations",
+  "AI search optimization SEO citations sources",
+  "référencement Google SEO actualité France",
+  "GEO SEO nouveauté moteurs de recherche France",
 ];
 
 // Convertit une date Serper ("il y a 3 jours", "2 days ago", "Oct 5, 2025"…) en nombre de jours.
